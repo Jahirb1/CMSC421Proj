@@ -12,7 +12,7 @@ description: a simple linux shell designed to perform basic linux commands
 #include <unistd.h>
 #include <sys/wait.h>
 #include <ctype.h>
-#include "utils.h"  // Ensure the utils.h header is present for unescape().
+#include "utils.h"
 
 /*
 Function Name: main
