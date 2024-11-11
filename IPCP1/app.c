@@ -1,3 +1,4 @@
+/* app.c */
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -11,23 +12,65 @@ static struct temp_buffer *my_temp_buffer;
 static int should_exit = 0;
 
 void *check_temp_buffer(void *arg) {
-    printf("App %d: check_temp_buffer started\n", app_id + 1);
+    (void)arg; // Avoid unused parameter warning
 
-    // TODO: Open log files for writing
-    // Continuously check my_temp_buffer for new messages
-    // Process messages and log the output
-    // Implement exit conditions and cleanup
+    // Check for messages in the temporary buffer every 3 seconds
+    printf("App %d: Monitoring temporary buffer for messages.\n", app_id);
+
+    char log_filename[64];
+    snprintf(log_filename, sizeof(log_filename), "/var/log/IPCproject/app%d_log.txt", app_id);
+
+    FILE *app_log = fopen(log_filename, "a");
+    if (!app_log) {
+        perror("Error opening app log file");
+        pthread_exit(NULL);
+    }
+
+    FILE *all_apps_log = fopen("/var/log/IPCproject/all_apps_log.txt", "a");
+    if (!all_apps_log) {
+        perror("Error opening all-apps log file");
+        fclose(app_log);
+        pthread_exit(NULL);
+    }
+
+    while (!should_exit) {
+        pthread_mutex_lock(&my_temp_buffer->mutex);
+        if (my_temp_buffer->count > 0) {
+            struct message msg = my_temp_buffer->messages[--my_temp_buffer->count];
+            pthread_mutex_unlock(&my_temp_buffer->mutex);
+
+            time_t now = time(NULL);
+            char time_str[32];
+            strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
+
+            // Log the message processing
+            fprintf(app_log, "[%s] Processed message: Priority: %d, Interval: %d ms, Data: %s\n", time_str, msg.priority, msg.random_time_interval, msg.data);
+            fprintf(all_apps_log, "[%s] App %d: Processed message: Priority: %d, Interval: %d ms, Data: %s\n", time_str, app_id, msg.priority, msg.random_time_interval, msg.data);
+
+            fflush(app_log);
+            fflush(all_apps_log);
+        } else {
+            pthread_mutex_unlock(&my_temp_buffer->mutex);
+            sleep(3);
+        }
+    }
+
+    fclose(app_log);
+    fclose(all_apps_log);
+    pthread_exit(NULL);
 }
 
 void run_application(int id, struct temp_buffer *temp_buffers) {
-    app_id = id - 1;
-    my_temp_buffer = &temp_buffers[app_id];
+    app_id = id;
+    my_temp_buffer = &temp_buffers[app_id - 1];
 
-    printf("Application %d started, temp buffer address: %p\n", app_id + 1, (void*)my_temp_buffer);
+    pthread_t buffer_thread;
+    if (pthread_create(&buffer_thread, NULL, check_temp_buffer, NULL) != 0) {
+        perror("Error creating thread for monitoring temp buffer");
+        exit(1);
+    }
 
-    // TODO: Create a thread that runs check_temp_buffer
-    // Wait for the thread to finish
-    // Perform any necessary cleanup
+    pthread_join(buffer_thread, NULL);
 }
 
 int main(int argc, char *argv[]) {
