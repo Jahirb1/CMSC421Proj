@@ -1,30 +1,19 @@
-# Compiler and flags
 CC = gcc
-CFLAGS = -Wall -g -pthread -lrt
+CFLAGS = -Wall -pthread
+LDFLAGS = -pthread -lrt
 
-# Target executable name
-TARGET = main
-
-# Source files
 SRCS = main.c buffer.c app.c
-
-# Object files
 OBJS = $(SRCS:.c=.o)
 
-# Default rule
-all: $(TARGET)
+all: main
 
-# Linking the target executable
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
+main: $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-# Compiling source files into object files
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Clean rule to remove object files and the executable
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f *.o main
 
-# Phony targets to prevent conflicts with files of the same name
-.PHONY: all cleanhttps://www.onlinegdb.com/#tab-stdin
+.PHONY: all clean
