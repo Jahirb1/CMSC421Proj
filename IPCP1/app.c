@@ -1,4 +1,3 @@
-/* app.c */
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -12,21 +11,22 @@ static struct temp_buffer *my_temp_buffer;
 static int should_exit = 0;
 
 void *check_temp_buffer(void *arg) {
-    (void)arg; // Avoid unused parameter warning
+    (void)arg; // Suppress unused parameter warning
+    printf("App %d: Monitoring temporary buffer for messages.\n", app_id + 1);
 
-    // Check for messages in the temporary buffer every 3 seconds
-    printf("App %d: Monitoring temporary buffer for messages.\n", app_id);
-
+    // Prepare log file names
     char log_filename[64];
-    snprintf(log_filename, sizeof(log_filename), "/var/log/IPCproject/app%d_log.txt", app_id);
+    snprintf(log_filename, sizeof(log_filename), "./app%d_log.txt", app_id + 1);
 
+    // Open the application-specific log file
     FILE *app_log = fopen(log_filename, "a");
     if (!app_log) {
-        perror("Error opening app log file");
+        perror("Error opening app-specific log file");
         pthread_exit(NULL);
     }
 
-    FILE *all_apps_log = fopen("/var/log/IPCproject/all_apps_log.txt", "a");
+    // Open the shared log file for all applications
+    FILE *all_apps_log = fopen("./all_apps_log.txt", "a");
     if (!all_apps_log) {
         perror("Error opening all-apps log file");
         fclose(app_log);
@@ -34,43 +34,60 @@ void *check_temp_buffer(void *arg) {
     }
 
     while (!should_exit) {
+        // Lock the temporary buffer to safely access shared data
         pthread_mutex_lock(&my_temp_buffer->mutex);
         if (my_temp_buffer->count > 0) {
+            // Retrieve the message from the buffer
             struct message msg = my_temp_buffer->messages[--my_temp_buffer->count];
             pthread_mutex_unlock(&my_temp_buffer->mutex);
 
+            // Get the current time for logging purposes
             time_t now = time(NULL);
             char time_str[32];
             strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
 
-            // Log the message processing
-            fprintf(app_log, "[%s] Processed message: Priority: %d, Interval: %d ms, Data: %s\n", time_str, msg.priority, msg.random_time_interval, msg.data);
-            fprintf(all_apps_log, "[%s] App %d: Processed message: Priority: %d, Interval: %d ms, Data: %s\n", time_str, app_id, msg.priority, msg.random_time_interval, msg.data);
+            // Write log entries to both app-specific and all-apps log files
+            fprintf(app_log, "[%s] App %d processed message: Priority: %d, Interval: %d ms, Data: %s\n", 
+                    time_str, app_id + 1, msg.priority, msg.random_time_interval, msg.data);
+            fprintf(all_apps_log, "[%s] App %d processed message: Priority: %d, Interval: %d ms, Data: %s\n", 
+                    time_str, app_id + 1, msg.priority, msg.random_time_interval, msg.data);
 
+            // Flush logs to ensure they are written to disk immediately
             fflush(app_log);
             fflush(all_apps_log);
         } else {
+            // No messages to process, release the lock and wait
             pthread_mutex_unlock(&my_temp_buffer->mutex);
-            sleep(3);
+            sleep(3); // Sleep for 3 seconds before checking again
         }
     }
 
+    // Close log files before exiting the thread
     fclose(app_log);
     fclose(all_apps_log);
+    printf("App %d finished monitoring temporary buffer.\n", app_id + 1);
     pthread_exit(NULL);
 }
 
 void run_application(int id, struct temp_buffer *temp_buffers) {
-    app_id = id;
-    my_temp_buffer = &temp_buffers[app_id - 1];
+    app_id = id - 1;
+    my_temp_buffer = &temp_buffers[app_id];
 
+    // Print a message indicating the start of the application
+    printf("Application %d started, temp buffer address: %p\n", app_id + 1, (void*)my_temp_buffer);
+
+    // Create a thread to monitor the temporary buffer for messages
     pthread_t buffer_thread;
     if (pthread_create(&buffer_thread, NULL, check_temp_buffer, NULL) != 0) {
-        perror("Error creating thread for monitoring temp buffer");
-        exit(1);
+        perror("Failed to create buffer monitoring thread");
+        exit(EXIT_FAILURE);
     }
 
+    // Wait for the buffer monitoring thread to finish
     pthread_join(buffer_thread, NULL);
+
+    // Print a message indicating the application is exiting
+    printf("Application %d exiting\n", app_id + 1);
 }
 
 int main(int argc, char *argv[]) {
