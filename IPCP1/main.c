@@ -11,8 +11,16 @@
 struct temp_buffer *shared_temp_buffers;
 
 void create_application_process(int app_id) {
-    // TODO: Implement process creation using fork()
-    // The child process should call run_application(app_id, shared_temp_buffers)
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("Error creating application process");
+        exit(EXIT_FAILURE);
+    } else if (pid == 0) {
+        // In the child process, run the application
+        run_application(app_id, shared_temp_buffers);
+        exit(EXIT_SUCCESS); // Exit child process after running the application
+    }
+    // Parent process continues without waiting here
 }
 
 int main() {
