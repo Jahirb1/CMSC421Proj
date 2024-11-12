@@ -2,12 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <pthread.h>
-#include <semaphore.h>
 #include "buffer.h"
-
-#define BUFFER_SIZE 10
-#define DATA_SIZE 256
 
 struct circular_buffer main_buffer;
 bool should_stop = false;
