@@ -5,67 +5,74 @@
 #include <time.h>
 #include "app.h"
 #include "buffer.h"
+#include <string.h>
 
 static int app_id;
 static struct temp_buffer *my_temp_buffer;
 static int should_exit = 0;
 
-void *check_temp_buffer(void *arg) {
-    (void)arg; // Suppress unused parameter warning
-    printf("App %d: Monitoring temporary buffer for messages.\n", app_id + 1);
+void check_temp_buffer(void *arg) {
+    (void)arg; // Marking param as unused to avoid warnings
+    // Each app will process 16 messages (48 total, divided among 3 apps)
+    const int MAX_MESSAGES = 16; 
+    printf("App %d: check_temp_buffer started\n", app_id + 1);
 
-    // Prepare log file names
-    char log_filename[64];
-    snprintf(log_filename, sizeof(log_filename), "./app%d_log.txt", app_id + 1);
-
-    // Open the application-specific log file
-    FILE *app_log = fopen(log_filename, "a");
+    FILE *app_log,*all_apps_log;
+    char app_log_filename[64];
+    snprintf(app_log_filename, sizeof(app_log_filename), "/var/log/IPCproject/app%d_log.txt", app_id + 1);
+    // Oppen both log files and check if theres anything in them
+    app_log = fopen(app_log_filename, "a");
     if (!app_log) {
         perror("Error opening app-specific log file");
         pthread_exit(NULL);
     }
 
-    // Open the shared log file for all applications
-    FILE *all_apps_log = fopen("./all_apps_log.txt", "a");
+    all_apps_log = fopen("/var/log/IPCproject/all_apps_log.txt", "a");
     if (!all_apps_log) {
         perror("Error opening all-apps log file");
         fclose(app_log);
         pthread_exit(NULL);
     }
+    int processed_messages = 0; // Counter to keep track of the messages processed
 
     while (!should_exit) {
-        // Lock the temporary buffer to safely access shared data
         pthread_mutex_lock(&my_temp_buffer->mutex);
         if (my_temp_buffer->count > 0) {
-            // Retrieve the message from the buffer
-            struct message msg = my_temp_buffer->messages[--my_temp_buffer->count];
+            struct buffer_item msg = my_temp_buffer->items[--my_temp_buffer->count];
             pthread_mutex_unlock(&my_temp_buffer->mutex);
 
-            // Get the current time for logging purposes
             time_t now = time(NULL);
-            char time_str[32];
-            strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
-
-            // Write log entries to both app-specific and all-apps log files
-            fprintf(app_log, "[%s] App %d processed message: Priority: %d, Interval: %d ms, Data: %s\n", 
-                    time_str, app_id + 1, msg.priority, msg.random_time_interval, msg.data);
-            fprintf(all_apps_log, "[%s] App %d processed message: Priority: %d, Interval: %d ms, Data: %s\n", 
-                    time_str, app_id + 1, msg.priority, msg.random_time_interval, msg.data);
-
-            // Flush logs to ensure they are written to disk immediately
+            char *timestamp = ctime(&now);
+            timestamp[strlen(timestamp) - 1] = '\0'; 
+            // Formatted messages for the consolse including the timestamp,priority, and msgpriority
+            printf("[%s] App %d processed message: Priority %d, Interval %d ms, Data: %s\n",timestamp, app_id + 1, msg.priority, msg.random_time_interval, msg.data);
+            fprintf(app_log, "[%s] App%d - Priority: %d, Interval: %d ms, Data: %s\n",timestamp, app_id + 1, msg.priority, msg.random_time_interval, msg.data);
+            fprintf(all_apps_log, "[%s] App%d - Priority: %d, Interval: %d ms, Data: %s\n",timestamp, app_id + 1, msg.priority, msg.random_time_interval, msg.data);
+            
+            // Ensure we've written to both log files
             fflush(app_log);
             fflush(all_apps_log);
-        } else {
-            // No messages to process, release the lock and wait
+            // Increment the number of processed messages
+            processed_messages++;
+
+            // Check if all messages have been processed for this app
+            if (processed_messages >= MAX_MESSAGES) {
+                printf("App %d has processed all %d messages.\n", app_id + 1, MAX_MESSAGES);
+                should_exit = 1; // Set flag to true (ie 1)
+            }
+
+        } 
+        else {
             pthread_mutex_unlock(&my_temp_buffer->mutex);
-            sleep(3); // Sleep for 3 seconds before checking again
+            // Sleep if there aren't any messages
+            sleep(3);
         }
     }
-
-    // Close log files before exiting the thread
+    // Close the files and print that info to the console
     fclose(app_log);
     fclose(all_apps_log);
-    printf("App %d finished monitoring temporary buffer.\n", app_id + 1);
+    printf("App %d finished processing.\n", app_id + 1);
+    // Then exit
     pthread_exit(NULL);
 }
 
@@ -73,47 +80,16 @@ void run_application(int id, struct temp_buffer *temp_buffers) {
     app_id = id - 1;
     my_temp_buffer = &temp_buffers[app_id];
 
-    // Print a message indicating the start of the application
     printf("Application %d started, temp buffer address: %p\n", app_id + 1, (void*)my_temp_buffer);
-
-    // Create a thread to monitor the temporary buffer for messages
+    // TODO: Create a thread that runs check_temp_buffer
     pthread_t buffer_thread;
     if (pthread_create(&buffer_thread, NULL, check_temp_buffer, NULL) != 0) {
-        perror("Failed to create buffer monitoring thread");
-        exit(EXIT_FAILURE);
+        perror("Failed to create buffer checking thread");
+        return;
     }
-
-    // Wait for the buffer monitoring thread to finish
+    // Wait for the thread to finish
     pthread_join(buffer_thread, NULL);
-
-    // Print a message indicating the application is exiting
+    // Perform any necessary cleanup
     printf("Application %d exiting\n", app_id + 1);
 }
 
-int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <app_id>\n", argv[0]);
-        exit(1);
-    }
-    int app_id = atoi(argv[1]);  // Convert the app_id argument from string to integer
-    printf("App started with app_id: %d\n", app_id);
-
-    // Attach to the shared memory segment created in main.c
-    int shm_fd = shm_open("/temp_buffers", O_RDWR, 0666);  // Open the shared memory region
-    if (shm_fd == -1) {
-        perror("shm_open");
-        exit(1);
-    }
-
-    shared_temp_buffers = mmap(0, NUM_APPS * sizeof(struct temp_buffer), 
-                               PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (shared_temp_buffers == MAP_FAILED) {
-        perror("mmap");
-        exit(1);
-    }
-
-    // Run the application logic using the app_id
-    run_application(app_id, shared_temp_buffers);
-
-    return 0;
-}
