@@ -2,21 +2,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
+#include <semaphore.h>
 #include "buffer.h"
+
+#define BUFFER_SIZE 10
+#define DATA_SIZE 256
 
 struct circular_buffer main_buffer;
 bool should_stop = false;
 
 void buffer_init(struct temp_buffer *temp_buffers) {
-    // Initialize the main buffer's variables
+    // Initialize the main buffer
     main_buffer.read = 0;
     main_buffer.write = 0;
     main_buffer.count = 0;
     pthread_mutex_init(&main_buffer.mutex, NULL);
-    sem_init(&main_buffer.empty, 0, BUFFER_SIZE);  // BUFFER_SIZE empty slots initially
-    sem_init(&main_buffer.full, 0, 0);             // No full slots initially
+    sem_init(&main_buffer.empty, 0, BUFFER_SIZE);
+    sem_init(&main_buffer.full, 0, 0);
 
-    // Initialize each temporary buffer's count and mutex
+    // Initialize temporary buffers
     for (int i = 0; i < NUM_APPS; i++) {
         temp_buffers[i].count = 0;
         pthread_mutex_init(&temp_buffers[i].mutex, NULL);
@@ -36,11 +41,10 @@ void buffer_cleanup(struct temp_buffer *temp_buffers) {
 }
 
 void bubbleSort(int arr[], int n) {
-    // Simple bubble sort to simulate a delay in processing
+    // Simple bubble sort to simulate delay
     for (int i = 0; i < n - 1; i++) {
         for (int j = 0; j < n - i - 1; j++) {
             if (arr[j] > arr[j + 1]) {
-                // Swap elements
                 int temp = arr[j];
                 arr[j] = arr[j + 1];
                 arr[j + 1] = temp;
